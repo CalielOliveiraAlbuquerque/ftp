@@ -33,17 +33,37 @@ struct Report{
     uint32 dlsr;
 };
 
+struct BitRange{
+    uint8 start;
+    uint8 length;
+};
+
+static const BitRange rtpVersion = {6, 2};
+static const BitRange rtpPadding = {5, 1};
+static const BitRange rtpExtension = {4, 1};
+static const BitRange rtpCsrcCount = {0, 4};
+
+static const BitRange rtpMarker = {6, 1};
+static const BitRange rtpPayLoadTime = {0, 7};
+
+static const BitRange rtpRc = {3, 5};
+
+inline
+void setByte(uint8* destination, uint8 value, const BitRange* range){
+    uint8 bitsSetMask = (1 << range->length) - 1; //1000 - 1 = 111
+    *destination &= ~(bitsSetMask << range->start); //zera a parte a esquerda não utilizada
+    *destination |= (value & bitsSetMask) << range->start; //mask & bitsSetMask faz com que o valor de mask só vá até onde range 'length'
+}
+
+inline
+uint8 getEquivalentByte(uint8 destination, const BitRange* range){
+    destination <<= 8 - (range->start + range->length);
+    return destination >> (8 - range->length);
+}
+
 struct RtpPacket{
-    struct{
-        uint8 version : 2;
-        bool padding : 1;
-        bool extension : 1;
-        uint8 csrcCount : 4;
-    };
-    struct{
-        bool marker : 1;
-        uint8 payloadTime : 7;
-    };
+    uint8 firstByte;
+    uint8 secondByte;
     uint16 sequenceNumber;
     uint32 timestamp;
     //SSRC é o acrônimo de Sychronization SouRCe
@@ -63,11 +83,7 @@ struct RtpHeaderExtension{
 };
 
 struct SenderReportRtcpPacket{
-    struct{
-        uint8 version : 2;
-        bool padding : 1;
-        uint8 rc : 5;
-    };
+    uint8 firstByte;
     uint8 packetType;
     uint16 length;
     uint32 ssrc;
@@ -87,11 +103,7 @@ struct SenderReportRtcpPacket{
 };
 
 struct ReceiverReportRtcpPacket{
-    struct{
-        uint8 version : 2;
-        bool padding : 1;
-        uint8 rc : 5;
-    };
+    uint8 firstByte;
     uint8 packetType;
     uint16 length;
     uint32 sscr;
@@ -99,3 +111,5 @@ struct ReceiverReportRtcpPacket{
     Report reports[];
     //Depois poderia ter profileEspecific extension (6.4.3 fala sobre isso)
 };
+
+void setByte(uint8* destination, uint8 mask, const BitRange* range);

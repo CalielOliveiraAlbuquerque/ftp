@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <assert.h>
+#include <time.h>
 
 //Talvez esteja faltando libavformat
 extern "C" {
@@ -15,13 +16,13 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+
 #include "types.h"
 #include "status.h"
 #include "sockets.h"
 #include "rtp.h"
-
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
 
 int socketSinglePoll(int fd, short events, int timeout){
     pollfd pfd;
@@ -74,9 +75,9 @@ void printMemory(void* memoryArg, size_t size){
     {
         uint8* currentByte = &memory[i];
 
-        for(int i = 0;
-                i < 8;
-                i++)
+        for(int i = 7;
+                i >= 0;
+                i--)
         {
             if(*currentByte & 1 << i){
                 printf("1");
@@ -104,6 +105,27 @@ const int videoStreamDataPort = 5050;
 const int audioStreamDataPort = 5052;
 
 int main(){
+    /*
+    rfc 3550
+    2.2 Audio and Video Conference
+
+   If both audio and video media are used in a conference, they are
+   transmitted as separate RTP sessions.  That is, separate RTP and RTCP
+   packets are transmitted for each medium using two different UDP port
+   pairs and/or multicast addresses.  There is no direct coupling at the
+   RTP level between the audio and video sessions, except that a user
+   participating in both sessions should use the same distinguished
+   (canonical) name in the RTCP packets for both so that the sessions
+   can be associated.
+
+   One motivation for this separation is to allow some participants in
+   the conference to receive only one medium if they choose.  Further
+   explanation is given in Section 5.2.  Despite the separation,
+   synchronized playback of a source's audio and video can be achieved
+   using timing information carried in the RTCP packets for both
+   sessions.
+   */
+
     RtpStream videoStream;
     {
         FunctionReturnStatus status = videoStream.init(videoStreamDataPort);
@@ -150,7 +172,8 @@ int main(){
     GC gc = XCreateGC(display, win, 0, NULL);
 
     AVFrame *pFrame = av_frame_alloc();
-    pFrame->format = AV_PIX_FMT_YUV420P;
+    enum AVPixelFormat pixelFormat = AV_PIX_FMT_YUV420P;
+    pFrame->format = pixelFormat;
     pFrame->width  = width;
     pFrame->height = height;
     const AVCodec* h264Codec = avcodec_find_encoder(AV_CODEC_ID_H264);
@@ -158,23 +181,36 @@ int main(){
         printf("Não há o codec para h264.\n");
         return 1;
     }
+
     AVCodecContext* avCodecContext = avcodec_alloc_context3(h264Codec);
-    avCodecContext->bit_rate = 400000;         // Adjust based on desired quality
-    avCodecContext->width = width;             // From your XWindowAttributes
+    avCodecContext->bit_rate = 400000;         
+    avCodecContext->width = width;            
     avCodecContext->height = height;
-    avCodecContext->time_base = (AVRational){1, 60}; // 60 FPS
-    avCodecContext->framerate = (AVRational){60, 1};
-    avCodecContext->gop_size = 10;             // Intra-frames every 10 frames
+    avCodecContext->time_base = (AVRational){1, 60};
+    avCodecContext->framerate = (AVRational){0, 1};
+    avCodecContext->gop_size = 10;            
     avCodecContext->max_b_frames = 1;
-    avCodecContext->pix_fmt = AV_PIX_FMT_YUV420P; // Must match your sws_scale output
+    avCodecContext->pix_fmt = pixelFormat; 
+
+    AVPacket* packet = av_packet_alloc();
 
     av_frame_get_buffer(pFrame, 0);
 
+    int framesAmount = 0;
+    time_t lastTime = time(NULL);
     while(1){
         //Pegar imagem da tela
         XImage *image = XGetImage(display, root, 0, 0, width, height, AllPlanes, ZPixmap);
+
+        framesAmount++;
+        if(time(NULL) > lastTime){
+            printf("Frames por segundo: %d.\n", framesAmount);
+            lastTime = time(NULL);
+            framesAmount = 0;
+        }
+
+        XPutImage(display, win, gc, image, 0, 0, 0, 0, width, height);
         
-#if 0
         //Converter para YUV
         //Ver se eu posso fazer esse typecasting em data
         const uint8 *inData[1] = { (uint8 *)image->data };
@@ -188,22 +224,16 @@ int main(){
                 );
 
         //Comprimir para h264
-        // 1. Send the raw frame to the encoder
         int ret = avcodec_send_frame(avCodecContext, pFrame);
 
-        AVPacket* packet;
         while (ret >= 0) {
-            // 2. Receive the compressed packet back
             ret = avcodec_receive_packet(avCodecContext, packet);
 
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
 
-            // 3. Packet is now encoded! Save it to a file or stream it.
-            // (This is your .mp4 data)
-
             av_packet_unref(packet);
         }
-#endif
+
         //Transformar em pacotes
         //Destruir imagem
         XDestroyImage(image);
