@@ -57,12 +57,16 @@ int main(){
     XMapWindow(display, win);
     GC gc = XCreateGC(display, win, 0, NULL);
 
+    uint8 timestampRolloverCounter = 0;
     while(1){
         //Receber dados
+
         //Descomprimir os dados
+
         //Converter os dados de YUV para RGBA/XImage
-        //Renderizar os dados
+
         XImage* image;
+        //Renderizar os dados
         XPutImage(display, win, gc, image, 0, 0, 0, 0, width, height);
     }
 

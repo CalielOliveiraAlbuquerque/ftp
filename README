@@ -1,0 +1,4 @@
+Comandos para instalar as bibliotecas necessárias em um sistema derivado do debian:
+
+sudo apt update
+sudo apt install libavcodec-dev libavutil-dev libswscale-dev libx11-dev

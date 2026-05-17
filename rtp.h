@@ -44,7 +44,7 @@ static const BitRange rtpExtension = {4, 1};
 static const BitRange rtpCsrcCount = {0, 4};
 
 static const BitRange rtpMarker = {6, 1};
-static const BitRange rtpPayLoadTime = {0, 7};
+static const BitRange rtpPayLoadType = {0, 7};
 
 static const BitRange rtpRc = {3, 5};
 
@@ -61,7 +61,7 @@ uint8 getEquivalentByte(uint8 destination, const BitRange* range){
     return destination >> (8 - range->length);
 }
 
-struct RtpPacket{
+struct RtpHeader{
     uint8 firstByte;
     uint8 secondByte;
     uint16 sequenceNumber;
@@ -112,4 +112,5 @@ struct ReceiverReportRtcpPacket{
     //Depois poderia ter profileEspecific extension (6.4.3 fala sobre isso)
 };
 
-void setByte(uint8* destination, uint8 mask, const BitRange* range);
+const int MtuSize = 1500; //em bytes
+const int udpHeaderSize = 8; //em bytes

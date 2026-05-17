@@ -6,11 +6,6 @@
 #include "types.h"
 #include "status.h"
 
-struct Ipv6Address{
-    uint64 h;
-    uint64 l;
-};
-
 union IpAddress{
     in6_addr ipv6;
     in_addr ipv4;
@@ -41,7 +36,7 @@ struct Socket{
                 bzero(&address, sizeof(sockaddr_in6));
                 address.sin6_family = AF_INET6;
                 address.sin6_port = htons(port);
-                memcpy(&address.sin6_addr, &destination.ipv6, sizeof(Ipv6Address));
+                memcpy(&address.sin6_addr, &destination.ipv6, sizeof(in6_addr));
 
                 if(bind(fd, (sockaddr*)&address, sizeof(address)) < 0) {
                     return FunctionReturnStatus::format(1, "Problema ao associar o socket com a porta %d.\n", port);

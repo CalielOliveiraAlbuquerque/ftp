@@ -24,6 +24,16 @@ extern "C" {
 #include "sockets.h"
 #include "rtp.h"
 
+void sendRtpPacket(const RtpStream* rtpStream, const uint32 timeStamp, const void* data, const int dataSize){
+    const char* dataBuffer = (const char*)data;
+
+    for(int i = 0;
+            i < dataSize;
+            i++)
+    {
+    }
+}
+
 int socketSinglePoll(int fd, short events, int timeout){
     pollfd pfd;
     pfd.fd = fd;
@@ -187,17 +197,30 @@ int main(){
     avCodecContext->width = width;            
     avCodecContext->height = height;
     avCodecContext->time_base = (AVRational){1, 60};
-    avCodecContext->framerate = (AVRational){0, 1};
+    avCodecContext->framerate = (AVRational){0, 60};
     avCodecContext->gop_size = 10;            
     avCodecContext->max_b_frames = 1;
     avCodecContext->pix_fmt = pixelFormat; 
 
-    AVPacket* packet = av_packet_alloc();
+    if (avcodec_open2(avCodecContext, h264Codec, NULL) < 0) {
+        printf("Não foi possível abrir o codec.\n");
+        return 1;
+    }
+    //Colocar aqui o 'jitter buffer'
+    //
+    //
+    //
+    //
+    //timestamps wrap around.
+
+    AVPacket* framePacket = av_packet_alloc();
 
     av_frame_get_buffer(pFrame, 0);
 
     int framesAmount = 0;
     time_t lastTime = time(NULL);
+    const uint32 timeStampOffset = random();
+    uint32 currentTimeStamp = timeStampOffset; //criação aleatória temporária do timestamp
     while(1){
         //Pegar imagem da tela
         XImage *image = XGetImage(display, root, 0, 0, width, height, AllPlanes, ZPixmap);
@@ -225,16 +248,23 @@ int main(){
 
         //Comprimir para h264
         int ret = avcodec_send_frame(avCodecContext, pFrame);
+        int amountOfPacketsCreated = 0;
 
-        while (ret >= 0) {
-            ret = avcodec_receive_packet(avCodecContext, packet);
-
-            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
-
-            av_packet_unref(packet);
+        if (ret < 0) {
+            char errbuf[AV_ERROR_MAX_STRING_SIZE];
+            av_strerror(ret, errbuf, sizeof(errbuf));
+            fprintf(stderr, "Erro ocorreu: %s (Código: %d)\n", errbuf, ret);
         }
 
-        //Transformar em pacotes
+        while (ret >= 0) {
+            ret = avcodec_receive_packet(avCodecContext, framePacket);
+
+            //sendRtpPacket(&videoStream, currentTimeStamp, framePacket->data, framePacket->size);
+
+            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
+            av_packet_unref(framePacket);
+        }
+
         //Destruir imagem
         XDestroyImage(image);
     }
