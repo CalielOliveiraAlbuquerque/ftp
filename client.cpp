@@ -15,34 +15,67 @@
 #include "types.h"
 #include "status.h"
 #include "rtp.h"
+#include "program.h"
 #include "sockets.h"
+#include "server.h"
 
-int main(){
-    RtpStream videoStream;
+#include "program.cpp"
+
+int main(int argc, char** argv){
+    IpAddress serverAddress;
+    if(argc == 1){
+        serverAddress.ipv6 = in6addr_loopback;
+    }else if(argc == 2){
+        inet_pton(AF_INET6, argv[1], &serverAddress.ipv6);
+    }else{
+        return 0;
+    }
+
+    const int clientScrc = random();
+    RtpStream serverVideoStream;
     {
-        FunctionReturnStatus status = videoStream.init(0);
+        FunctionReturnStatus status = serverVideoStream.init(&serverAddress, serverVideoStreamDataPort);
         if(status.error > 0){
             printf("Erro ao criar stream de vídeo por -> %s\n", status.message);
             return 0;
         }
     }
+    RtpStream serverAudioStream;
+    {
+        FunctionReturnStatus status = serverAudioStream.init(&serverAddress, serverAudioStreamDataPort);
+        if(status.error > 0){
+            printf("Erro ao criar stream de vídeo por -> %s\n", status.message);
+            return 0;
+        }
+    }
+
+    RtpStream clientVideoStream;
+    {
+        FunctionReturnStatus status = clientVideoStream.init(0);
+        if(status.error > 0){
+            printf("Erro ao criar stream de vídeo por -> %s\n", status.message);
+            return 0;
+        }
+    }
+    clientVideoStream.ssrc = clientScrc;
     printf("Stream de vídeo criada.\n");
-    printf("Porta do socket de dados: %d.\n", videoStream.dataSocket.fd);
-    printf("Porta do socket de controle: %d.\n", videoStream.controlSocket.fd);
+    printf("Porta do socket de dados: %d.\n", clientVideoStream.dataSocket.fd);
+    printf("Porta do socket de controle: %d.\n", clientVideoStream.controlSocket.fd);
     printf("\n");
 
     //Parte secundária
-    RtpStream audioStream;
+    RtpStream clientAudioStream;
     {
-        FunctionReturnStatus status = audioStream.init(0);
+        FunctionReturnStatus status = clientAudioStream.init(0);
         if(status.error > 0){
             printf("Erro ao criar stream de áudio por -> %s.\n", status.message);
             return 0;
         }
     }
+    clientAudioStream.ssrc = clientScrc + 1;
     printf("Stream de áudio criada.\n");
-    printf("Porta do socket de dados: %d.\n", audioStream.dataSocket.fd);
-    printf("Porta do socket de controle: %d.\n", audioStream.controlSocket.fd);
+    printf("Porta do socket de dados: %d.\n", clientAudioStream.dataSocket.fd);
+    printf("Porta do socket de controle: %d.\n", clientAudioStream.controlSocket.fd);
     printf("\n");
 
     Display *display = XOpenDisplay(NULL);
@@ -58,18 +91,29 @@ int main(){
     GC gc = XCreateGC(display, win, 0, NULL);
 
     uint8 timestampRolloverCounter = 0;
-    while(1){
-        //Receber dados
 
-        //Descomprimir os dados
+    while(1)
+    {
+        Message connectMeMessage;
+        connectMeMessage.messageType = connectMe;
+        connectMeMessage.stream = clientVideoStream;
+        sendRtpMessage(&clientVideoStream, &serverVideoStream, &connectMeMessage);
+        socketSinglePoll(clientVideoStream.dataSocket.fd, POLLIN, 300);
 
-        //Converter os dados de YUV para RGBA/XImage
+        while(1){
+            socketSinglePoll(clientVideoStream.dataSocket.fd, POLLIN, 300);
+            //Receber dados
 
-        XImage* image;
-        //Renderizar os dados
-        XPutImage(display, win, gc, image, 0, 0, 0, 0, width, height);
+            //Descomprimir os dados
+
+            //Converter os dados de YUV para RGBA/XImage
+
+            XImage* image;
+            //Renderizar os dados
+            XPutImage(display, win, gc, image, 0, 0, 0, 0, width, height);
+        }
     }
 
-    shutdown(videoStream.dataSocket.fd, SHUT_WR);
-    shutdown(videoStream.controlSocket.fd, SHUT_WR);
+    shutdown(clientVideoStream.dataSocket.fd, SHUT_WR);
+    shutdown(clientVideoStream.controlSocket.fd, SHUT_WR);
 }

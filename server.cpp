@@ -23,26 +23,10 @@ extern "C" {
 #include "status.h"
 #include "sockets.h"
 #include "rtp.h"
+#include "server.h"
 
-void sendRtpPacket(const RtpStream* rtpStream, const uint32 timeStamp, const void* data, const int dataSize){
-    const char* dataBuffer = (const char*)data;
-
-    for(int i = 0;
-            i < dataSize;
-            i++)
-    {
-    }
-}
-
-int socketSinglePoll(int fd, short events, int timeout){
-    pollfd pfd;
-    pfd.fd = fd;
-    pfd.events = events;
-
-    int result = poll(&pfd, 1, timeout);
-
-    return result > 0? pfd.revents : result;
-}
+#include "program.cpp"
+#include "rtp.cpp"
 
 char* fileToString(FILE* file){
     uint64 startingPos = ftell(file);
@@ -111,9 +95,6 @@ void endiannesTest() {
     printf("\n");
 }
 
-const int videoStreamDataPort = 5050;
-const int audioStreamDataPort = 5052;
-
 int main(){
     /*
     rfc 3550
@@ -136,13 +117,15 @@ int main(){
    sessions.
    */
 
+    const uint32 serverSsrc = random();
     RtpStream videoStream;
     {
-        FunctionReturnStatus status = videoStream.init(videoStreamDataPort);
+        FunctionReturnStatus status = videoStream.init(serverVideoStreamDataPort);
         if(status.error > 0){
             printf("Erro ao criar stream de vídeo por -> %s\n", status.message);
             return 0;
         }
+        videoStream.ssrc = serverSsrc;
     }
     printf("Stream de vídeo criada.\n");
     printf("Porta do socket de dados: %d.\n", videoStream.dataSocket.fd);
@@ -152,11 +135,12 @@ int main(){
     //Parte secundária
     RtpStream audioStream;
     {
-        FunctionReturnStatus status = audioStream.init(audioStreamDataPort);
+        FunctionReturnStatus status = audioStream.init(serverAudioStreamDataPort);
         if(status.error > 0){
             printf("Erro ao criar stream de áudio por -> %s.\n", status.message);
             return 0;
         }
+        audioStream.ssrc = serverSsrc + 1;
     }
     printf("Stream de áudio criada.\n");
     printf("Porta do socket de dados: %d.\n", audioStream.dataSocket.fd);
@@ -206,34 +190,29 @@ int main(){
         printf("Não foi possível abrir o codec.\n");
         return 1;
     }
-    //Colocar aqui o 'jitter buffer'
-    //
-    //
-    //
-    //
-    //timestamps wrap around.
+
+    RtpStream clients[maximumAmountOfConnections];
+    int clientCount = 0;
 
     AVPacket* framePacket = av_packet_alloc();
 
     av_frame_get_buffer(pFrame, 0);
 
-    int framesAmount = 0;
-    time_t lastTime = time(NULL);
+    int frameCount = 0;
+    time_t startingTime = time(NULL);
     const uint32 timeStampOffset = random();
-    uint32 currentTimeStamp = timeStampOffset; //criação aleatória temporária do timestamp
+    uint32 currentTimeStamp = timeStampOffset; 
     while(1){
+        if(clientCount == 0){
+            printf("Servidor escutando na porta %d", videoStream.dataSocket.port);
+            socketSinglePoll(videoStream.dataSocket.fd, POLLIN, 300);
+        }
         //Pegar imagem da tela
         XImage *image = XGetImage(display, root, 0, 0, width, height, AllPlanes, ZPixmap);
 
-        framesAmount++;
-        if(time(NULL) > lastTime){
-            printf("Frames por segundo: %d.\n", framesAmount);
-            lastTime = time(NULL);
-            framesAmount = 0;
-        }
+        frameCount++;
+        pFrame->pts = frameCount;
 
-        XPutImage(display, win, gc, image, 0, 0, 0, 0, width, height);
-        
         //Converter para YUV
         //Ver se eu posso fazer esse typecasting em data
         const uint8 *inData[1] = { (uint8 *)image->data };
@@ -259,17 +238,24 @@ int main(){
         while (ret >= 0) {
             ret = avcodec_receive_packet(avCodecContext, framePacket);
 
-            //sendRtpPacket(&videoStream, currentTimeStamp, framePacket->data, framePacket->size);
-
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
+            currentTimeStamp = timeStampOffset + framePacket->pts * 90000 / 60;
+            for(int i = 0;
+                    i < clientCount;
+                    i++)
+            {
+                sendRtpPacketh264(&videoStream, &clients[i], currentTimeStamp, framePacket->data, framePacket->size);
+            }
+
             av_packet_unref(framePacket);
         }
+
+        XPutImage(display, win, gc, image, 0, 0, 0, 0, width, height);
 
         //Destruir imagem
         XDestroyImage(image);
     }
-    XCloseDisplay(display);
 
-    shutdown(videoStream.dataSocket.fd, SHUT_WR);
-    shutdown(videoStream.controlSocket.fd, SHUT_WR);
+    videoStream.shutdownStream();
+    audioStream.shutdownStream();
 }

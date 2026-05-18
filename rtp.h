@@ -1,6 +1,7 @@
 #pragma once
 
 #include "types.h"
+#include "sockets.h"
 #include <fcntl.h>
 
 #define MAX_MESSAGE_SIZE KB(1024)
@@ -33,36 +34,27 @@ struct Report{
     uint32 dlsr;
 };
 
-struct BitRange{
-    uint8 start;
-    uint8 length;
-};
-
-static const BitRange rtpVersion = {6, 2};
-static const BitRange rtpPadding = {5, 1};
-static const BitRange rtpExtension = {4, 1};
-static const BitRange rtpCsrcCount = {0, 4};
-
-static const BitRange rtpMarker = {6, 1};
-static const BitRange rtpPayLoadType = {0, 7};
-
-static const BitRange rtpRc = {3, 5};
-
-inline
-void setByte(uint8* destination, uint8 value, const BitRange* range){
-    uint8 bitsSetMask = (1 << range->length) - 1; //1000 - 1 = 111
-    *destination &= ~(bitsSetMask << range->start); //zera a parte a esquerda não utilizada
-    *destination |= (value & bitsSetMask) << range->start; //mask & bitsSetMask faz com que o valor de mask só vá até onde range 'length'
-}
-
-inline
-uint8 getEquivalentByte(uint8 destination, const BitRange* range){
-    destination <<= 8 - (range->start + range->length);
-    return destination >> (8 - range->length);
-}
-
 struct RtpHeader{
-    uint8 firstByte;
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+    uint8 csrcCount:4;   
+    uint8 extension:1;   
+    uint8 padding:1;     
+    uint8 version:2;     
+#elif __BYTE_ORDER == __BIG_ENDIAN
+    uint8 version:2;     
+    uint8 padding:1;     
+    uint8 extension:1;   
+    uint8 csrcCount:4;   
+#endif
+
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+    uint8 payloadType:7; 
+    uint8 marker:1;      
+#elif __BYTE_ORDER == __BIG_ENDIAN
+    uint8 marker:1;      
+    uint8 payloadType:7; 
+#endif
+
     uint8 secondByte;
     uint16 sequenceNumber;
     uint32 timestamp;
@@ -83,7 +75,15 @@ struct RtpHeaderExtension{
 };
 
 struct SenderReportRtcpPacket{
-    uint8 firstByte;
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+    uint8 reportCount:5; 
+    uint8 padding:1;     
+    uint8 version:2;     
+#elif __BYTE_ORDER == __BIG_ENDIAN
+    uint8 version:2;     
+    uint8 padding:1;     
+    uint8 reportCount:5; 
+#endif
     uint8 packetType;
     uint16 length;
     uint32 ssrc;
@@ -103,7 +103,15 @@ struct SenderReportRtcpPacket{
 };
 
 struct ReceiverReportRtcpPacket{
-    uint8 firstByte;
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+    uint8 reportCount:5; 
+    uint8 padding:1;     
+    uint8 version:2;     
+#elif __BYTE_ORDER == __BIG_ENDIAN
+    uint8 version:2;     
+    uint8 padding:1;     
+    uint8 reportCount:5; 
+#endif
     uint8 packetType;
     uint16 length;
     uint32 sscr;
@@ -112,5 +120,36 @@ struct ReceiverReportRtcpPacket{
     //Depois poderia ter profileEspecific extension (6.4.3 fala sobre isso)
 };
 
-const int MtuSize = 1500; //em bytes
-const int udpHeaderSize = 8; //em bytes
+struct RtpStream{
+    Socket dataSocket, controlSocket;
+    int ssrc;
+
+    FunctionReturnStatus init(IpAddress* ipAddress, int dataSocketPort){
+        IpAddress b;
+        b.ipv6 = ipAddress->ipv6;
+        FunctionReturnStatus result = dataSocket.init(AF_INET6, SOCK_DGRAM, dataSocketPort, b);
+        if(result.error){
+            return FunctionReturnStatus::format(1, "Erro ao criar o socket de dados por -> %s", result.message);
+        }
+        result = controlSocket.init(AF_INET6, SOCK_DGRAM, dataSocketPort + 1, b);
+        if(result.error){
+            return FunctionReturnStatus::format(1, "Erro ao criar o socket de controle por -> %s", result.message);
+        }
+
+        return {0, ""};
+    }
+
+    FunctionReturnStatus init(int dataSocketPort){
+        return init((IpAddress*)&in6addr_loopback, dataSocketPort);
+    }
+
+    void shutdownStream(){
+        shutdown(dataSocket.fd, SHUT_RDWR);
+        shutdown(controlSocket.fd, SHUT_RDWR);
+    }
+};
+
+const int mtuSize = 1500;
+const int udpHeaderSize = 8;
+const int rtpMaximumPacketSize = mtuSize - udpHeaderSize;
+const char annexBStartCode24[3] = {0x00, 0x00, 0x01};
